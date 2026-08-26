@@ -1,8 +1,5 @@
 <?php
-/**
- * Run this once from the command line to create a staff account:
- *   php create_staff.php admin "Jane Smith" mypassword123
- */
+
 require 'db.php';
 
 if ($argc < 4) {
