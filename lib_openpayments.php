@@ -1,8 +1,6 @@
 <?php
 /**
  * Interledger Open Payments integration, backed by Rafiki.
- *
- * THE TWO-RATE PROBLEM, AND HOW IT IS RESOLVED HERE
  * ---------------------------------------------------------------------------
  * UniPay has two sources of conversion:
  *
@@ -12,36 +10,14 @@
  *
  *   2. Rafiki's quote. Authoritative. It is what actually moves money, and it
  *      includes the network's own conversion and fees.
- *
- * These will not agree exactly, and that is expected. The rule enforced below:
- * the estimate is display-only, and the recorded transaction always uses
- * Rafiki's figures. Applying the lib_rates rate on top of the Rafiki amounts
- * would convert twice, which is the classic bug in this integration.
- *
- * getQuote() therefore returns BOTH: 'estimate_*' fields for the pre-commit
- * display, and, once Rafiki has quoted, 'debit_*' / 'receive_*' from Rafiki.
- *
- * SETTLEMENT ASSET
- * ---------------------------------------------------------------------------
- * Fees are denominated in AUD. Rafiki settles in RAFIKI_ASSET_CODE. If those
- * differ (the Local Playground seeds USD), createPayment() converts the fee
- * into the settlement asset before creating the receiver, otherwise a 45 AUD
- * fee would silently collect 45 USD. The production fix is to configure an AUD
- * asset on your Rafiki instance so no conversion is needed at all.
- */
+*/
+
+
+
 
 require_once __DIR__ . '/lib_rates.php';
 require_once __DIR__ . '/lib_rafiki.php';
 
-/**
- * Pre-authorisation estimate: what the student will roughly pay, in their
- * chosen currency, for an AUD-denominated fee.
- *
- * No Rafiki call happens here, so the currency picker stays instant and works
- * even if the playground is down. The real quote is created at pay time.
- *
- * @throws RatesUnavailableException if no trustworthy rate is available.
- */
 function getQuote(float $amountAud, string $targetCurrency): array
 {
     $conv = convertFromBase($amountAud, $targetCurrency);
