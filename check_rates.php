@@ -1,14 +1,4 @@
 <?php
-/**
- * check_rates.php: diagnostic page for the rate layer.
- *
- * Visit http://localhost/UniPay/check_rates.php to see exactly why the
- * currency picker is unavailable.
- *
- * DELETE THIS FILE before putting UniPay anywhere public. It reveals file
- * paths and PHP configuration, which is fine on localhost and not fine on
- * a shared host.
- */
 
 require_once __DIR__ . '/lib_rates.php';
 
