@@ -97,8 +97,5 @@ Then log in at `login.php`. Every staff-only page (`staff_generate.php`, `reconc
 As for now, the AI agent is not fully functionally due to time limitations but something to consider in the future
 
 
-```
-export ANTHROPIC_API_KEY=sk-ant-...
-```
 
 
