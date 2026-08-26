@@ -4,11 +4,7 @@ require 'lib_openpayments.php';
 
 header('Content-Type: application/json');
 
-/**
- * Show the real exception to localhost, a generic message to everyone else.
- * Exception text leaks table names and file paths, so it must never reach a
- * remote visitor, but hiding it during local development just means guessing.
- */
+
 if (!function_exists('errorDetail')) {
     function errorDetail(Throwable $e, string $publicMessage): string
     {
@@ -38,12 +34,11 @@ if (!$link) {
 try {
     $quote = getQuote((float)$link['amount'], $currency);
 
-    // The client only needs to display this. process_payment.php recomputes
-    // the amount server-side from the token, so a tampered copy buys nothing.
+
     echo json_encode(['success' => true, 'quote' => $quote]);
 
 } catch (RatesUnavailableException $e) {
-    // No fallback by design: refuse to quote rather than invent a rate.
+
     error_log('[unipay/rates] ' . $e->getMessage());
     http_response_code(503);
     echo json_encode([
