@@ -28,11 +28,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Staff Login — WSU Payments</title>
+    <title>Staff Login | UniPay</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
-    <h1>WSU Payments <span class="badge">x Interledger</span></h1>
+<?php require 'header.php'; ?>
     <h3>Staff login</h3>
 
     <?php if ($error): ?><div class="notice overdue"><?= htmlspecialchars($error) ?></div><?php endif; ?>

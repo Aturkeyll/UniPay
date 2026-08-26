@@ -1,14 +1,14 @@
 <?php
 /**
- * lib_rates.php — currency rates for UniPay.
+ * lib_rates.php: currency rates for UniPay.
  *
  * Two sources, deliberately handled differently:
  *
- *   FIAT   — Frankfurter (https://frankfurter.dev), ECB reference rates.
+ *   FIAT:   Frankfurter (https://frankfurter.dev), ECB reference rates.
  *            No API key, no signup, no quota. Native AUD base.
  *            Fetched by cron, cached, read by the web.
  *
- *   CRYPTO — crypto_rates.php, maintained by hand.
+ *   CRYPTO: crypto_rates.php, maintained by hand.
  *            Read straight from disk on every request, so editing that file
  *            takes effect immediately with no cron run.
  *
@@ -16,12 +16,15 @@
  * or stale, or the manual crypto table has expired, the relevant call throws and
  * the checkout refuses to quote.
  *
- * Cron (hourly is plenty — ECB publishes once per working day):
+ * Cron (hourly is plenty, ECB publishes once per working day):
  *   0 * * * * /usr/bin/php /path/to/lib_rates.php >> /var/log/unipay-rates.log 2>&1
  */
 
-const FRANKFURTER_LATEST_URL     = 'https://api.frankfurter.app/latest';
-const FRANKFURTER_CURRENCIES_URL = 'https://api.frankfurter.app/currencies';
+// api.frankfurter.app 301-redirects here. Use the canonical host directly so a
+// redirect isn't on the critical path. v1 is frozen but supported, and its
+// response shape ({amount, base, date, rates}) is what this file parses.
+const FRANKFURTER_LATEST_URL     = 'https://api.frankfurter.dev/v1/latest';
+const FRANKFURTER_CURRENCIES_URL = 'https://api.frankfurter.dev/v1/currencies';
 
 const BASE_CURRENCY      = 'AUD';
 const CRYPTO_CONFIG_FILE = __DIR__ . '/crypto_rates.php';
@@ -29,7 +32,7 @@ const RATES_CACHE_FILE   = __DIR__ . '/cache/rates.json';
 const SYMBOLS_CACHE_FILE = __DIR__ . '/cache/currencies.json';
 
 // Refuse to quote fiat if cron hasn't succeeded within this many seconds.
-// Applies to OUR fetch time, not the ECB publication date — see below.
+// Applies to OUR fetch time, not the ECB publication date; see below.
 const RATES_MAX_AGE = 7200;
 
 // The ECB publishes once per working day, so its date is legitimately 1-3 days
@@ -52,6 +55,10 @@ class RatesUnavailableException extends RuntimeException {}
 
 /**
  * GET + decode JSON. Frankfurter needs no auth, so this stays minimal.
+ *
+ * Follows redirects: the API moved hosts once already (api.frankfurter.app ->
+ * api.frankfurter.dev/v1), and without this a 301 surfaced as a bare "HTTP 301"
+ * that said nothing about where it had gone.
  */
 function httpGetJson(string $url, int $timeoutSeconds = 10): array
 {
@@ -61,22 +68,29 @@ function httpGetJson(string $url, int $timeoutSeconds = 10): array
         CURLOPT_TIMEOUT        => $timeoutSeconds,
         CURLOPT_CONNECTTIMEOUT => $timeoutSeconds,
         CURLOPT_USERAGENT      => 'UniPay/1.0',
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS      => 3,
     ]);
-    $body   = curl_exec($ch);
-    $errNo  = curl_errno($ch);
-    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $body     = curl_exec($ch);
+    $errNo    = curl_errno($ch);
+    $errMsg   = curl_error($ch);
+    $status   = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $finalUrl = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
     curl_close($ch);
 
     if ($errNo !== 0 || $body === false) {
-        throw new RatesUnavailableException("Transport error ($errNo) for $url");
+        // errno 60 on Windows/XAMPP means no CA bundle: set curl.cainfo in php.ini.
+        throw new RatesUnavailableException("Transport error $errNo ($errMsg) for $url");
     }
     if ($status !== 200) {
-        throw new RatesUnavailableException("HTTP $status from $url");
+        // Name where we ended up, so a future move diagnoses itself.
+        $where = ($finalUrl !== '' && $finalUrl !== $url) ? " (followed to $finalUrl)" : '';
+        throw new RatesUnavailableException("HTTP $status from $url$where");
     }
 
     $decoded = json_decode((string) $body, true);
     if (!is_array($decoded)) {
-        throw new RatesUnavailableException("Unparseable JSON from $url");
+        throw new RatesUnavailableException("Unparseable JSON from $finalUrl");
     }
 
     return $decoded;
@@ -109,7 +123,7 @@ function readCache(string $path): ?array
 
 
 // ---------------------------------------------------------------------------
-// FIAT — Frankfurter, fetched by cron
+// FIAT: Frankfurter, fetched by cron
 // ---------------------------------------------------------------------------
 
 /**
@@ -170,7 +184,7 @@ function refreshCurrencies(): array
 
 
 // ---------------------------------------------------------------------------
-// CRYPTO — crypto_rates.php, read from disk every request
+// CRYPTO: crypto_rates.php, read from disk every request
 // ---------------------------------------------------------------------------
 
 /**
@@ -234,7 +248,7 @@ function getManualCryptoRates(): array
 
 
 // ---------------------------------------------------------------------------
-// Combined accessors — what the rest of the app calls
+// Combined accessors: what the rest of the app calls
 // ---------------------------------------------------------------------------
 
 /**
@@ -328,7 +342,7 @@ function convertFromBase(float $amountBase, string $targetCurrency): array
 
 /**
  * Currency metadata for the picker: code => ['name' => ..., 'type' => ...].
- * Reads cache and disk only — pay.php renders this on every page load and must
+ * Reads cache and disk only, pay.php renders this on every page load and must
  * never trigger an outbound call to do it.
  */
 function getSupportedCurrencies(): array
@@ -374,11 +388,11 @@ if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === realpath(__F
         }
 
         fwrite(STDOUT, sprintf(
-            "[%s] OK — %d fiat rates, ECB fix %s\n",
+            "[%s] OK, %d fiat rates, ECB fix %s\n",
             date('c'), count($rates['rates']), $rates['ecb_date'] ?? 'unknown'
         ));
     } catch (Throwable $e) {
-        fwrite(STDERR, sprintf("[%s] FIAT FAIL — %s\n", date('c'), $e->getMessage()));
+        fwrite(STDERR, sprintf("[%s] FIAT FAIL, %s\n", date('c'), $e->getMessage()));
         $exit = 1;
     }
 
@@ -390,11 +404,11 @@ if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === realpath(__F
         $warn = (MANUAL_RATES_MAX_AGE_DAYS !== null && $ageDays > MANUAL_RATES_MAX_AGE_DAYS - 1)
             ? '  <-- EXPIRING SOON, update crypto_rates.php' : '';
         fwrite(STDOUT, sprintf(
-            "[%s] OK — %d manual crypto rates, as of %s (%.1f days old)%s\n",
+            "[%s] OK, %d manual crypto rates, as of %s (%.1f days old)%s\n",
             date('c'), count($crypto['rates']), $crypto['as_of'], $ageDays, $warn
         ));
     } catch (Throwable $e) {
-        fwrite(STDERR, sprintf("[%s] CRYPTO FAIL — %s\n", date('c'), $e->getMessage()));
+        fwrite(STDERR, sprintf("[%s] CRYPTO FAIL, %s\n", date('c'), $e->getMessage()));
         $exit = 1;
     }
 

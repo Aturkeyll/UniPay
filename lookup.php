@@ -44,11 +44,12 @@ if ($query !== '') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Student/Payee Lookup — WSU Payments</title>
+    <title>Student/Payee Lookup | UniPay</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
-    <h1>WSU Payments <span class="badge">x Interledger</span></h1>
+<?php require 'header.php'; ?>
     <h3>Student / Payee lookup</h3>
 
     <form method="get">
@@ -69,7 +70,7 @@ if ($query !== '') {
             <tr>
                 <td><?= htmlspecialchars($o['item_name']) ?></td>
                 <td>$<?= htmlspecialchars($o['amount']) ?></td>
-                <td><?= htmlspecialchars($o['due_date'] ?? '—') ?></td>
+                <td><?= htmlspecialchars($o['due_date'] ?? '-') ?></td>
                 <td><a href="send_reminder.php?link_id=<?= $o['id'] ?>">Send reminder</a></td>
             </tr>
             <?php endforeach; ?>

@@ -7,17 +7,19 @@ $isStaff = !empty($_SESSION['staff_id']);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WSU Payments — Interledger Hackathon</title>
+    <title>UniPay | Interledger Hackathon</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
-    <h1>WSU Payments <span class="badge">x Interledger</span></h1>
-    <p>Built for the WSU x Interledger Hackathon — Track 1: Student and Education Payments.</p>
-    <p class="small">Interoperable payments (fiat + crypto) for student union, society, club, and event fees —
-        with an AI agent to help students understand what they owe.</p>
+<?php require 'header.php'; ?>
+    <h1>Interoperable payments for student fees</h1>
+    <p class="small">Built for the WSU x Interledger Hackathon, Track 1: Student and Education Payments.
+        Fiat and crypto payments for student union, society, club, and event fees, with an AI agent
+        to help students understand what they owe.</p>
 
     <?php if ($isStaff): ?>
-        <p>Signed in as <strong><?= htmlspecialchars($_SESSION['staff_name']) ?></strong> | <a href="logout.php">Log out</a></p>
+        <p class="small">Signed in as <strong><?= htmlspecialchars($_SESSION['staff_name'] ?? 'staff') ?></strong></p>
 
         <h3>Staff tools</h3>
         <ul>
@@ -33,7 +35,7 @@ $isStaff = !empty($_SESSION['staff_id']);
     <h3>Student tools</h3>
     <ul>
         <li><a href="my_payments.php">Check what you owe / pay now</a></li>
-        <li><a href="manual_payment.php">Make a manual payment</a> (no item link needed — staff will reconcile it)</li>
+        <li><a href="manual_payment.php">Make a manual payment</a> (no item link needed; staff will reconcile it)</li>
         <li><a href="ask.php">Ask what you owe (AI assistant)</a></li>
         <li class="small">Staff can also send you a direct "pay.php?token=..." link for a specific item.</li>
     </ul>

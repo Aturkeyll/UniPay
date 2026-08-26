@@ -1,67 +1,163 @@
 <?php
 /**
- * Interledger Open Payments integration.
+ * Interledger Open Payments integration, backed by Rafiki.
  *
- * This wraps the Open Payments flow: get a quote (currency/asset conversion),
- * then create the incoming/outgoing payment. The network calls to Interledger
- * are still stubbed so the rest of the app can be demoed. The FX rates behind
- * getQuote() come from lib_rates.php: ECB fiat is live, crypto is hand-set in
- * crypto_rates.php and every quote records which of the two it used.
+ * THE TWO-RATE PROBLEM, AND HOW IT IS RESOLVED HERE
+ * ---------------------------------------------------------------------------
+ * UniPay has two sources of conversion:
  *
- * Real flow (for reference, when you wire it up):
- *   1. GET the receiving wallet address -> resource server + auth server URLs
- *   2. POST /incoming-payments on the receiver's resource server (needs a grant)
- *   3. POST /quotes on the sender's resource server, referencing the incoming payment
- *   4. Get an interactive grant for the outgoing payment (redirect student to authorize)
- *   5. POST /outgoing-payments to actually move the funds
+ *   1. lib_rates.php  (Frankfurter ECB + hand-set crypto). Available instantly,
+ *      no network call on the checkout path. Used ONLY to show the student an
+ *      indicative figure before they commit.
  *
- * NOTE when you do wire up step 3: the Open Payments /quotes response is
- * authoritative for the conversion. At that point the rate from lib_rates.php
- * becomes a pre-authorization *estimate* shown to the student, and must NOT be
- * applied on top of the ILP rate. Converting twice is a nasty bug to find.
- * This matters most for the hand-set crypto rates, which will drift furthest
- * from whatever the ILP network actually quotes.
+ *   2. Rafiki's quote. Authoritative. It is what actually moves money, and it
+ *      includes the network's own conversion and fees.
+ *
+ * These will not agree exactly, and that is expected. The rule enforced below:
+ * the estimate is display-only, and the recorded transaction always uses
+ * Rafiki's figures. Applying the lib_rates rate on top of the Rafiki amounts
+ * would convert twice, which is the classic bug in this integration.
+ *
+ * getQuote() therefore returns BOTH: 'estimate_*' fields for the pre-commit
+ * display, and, once Rafiki has quoted, 'debit_*' / 'receive_*' from Rafiki.
+ *
+ * SETTLEMENT ASSET
+ * ---------------------------------------------------------------------------
+ * Fees are denominated in AUD. Rafiki settles in RAFIKI_ASSET_CODE. If those
+ * differ (the Local Playground seeds USD), createPayment() converts the fee
+ * into the settlement asset before creating the receiver, otherwise a 45 AUD
+ * fee would silently collect 45 USD. The production fix is to configure an AUD
+ * asset on your Rafiki instance so no conversion is needed at all.
  */
 
 require_once __DIR__ . '/lib_rates.php';
+require_once __DIR__ . '/lib_rafiki.php';
 
 /**
- * Get a quote converting $amountAud (the amount owed, in AUD) into the
- * currency the student wants to pay with.
+ * Pre-authorisation estimate: what the student will roughly pay, in their
+ * chosen currency, for an AUD-denominated fee.
+ *
+ * No Rafiki call happens here, so the currency picker stays instant and works
+ * even if the playground is down. The real quote is created at pay time.
  *
  * @throws RatesUnavailableException if no trustworthy rate is available.
- *         This is deliberate — there is no fallback rate table. Callers should
- *         surface a "try again shortly" message rather than quoting a guess.
  */
 function getQuote(float $amountAud, string $targetCurrency): array
 {
     $conv = convertFromBase($amountAud, $targetCurrency);
 
     return [
-        'quote_id'        => 'quote-' . bin2hex(random_bytes(8)),
+        'quote_id'        => 'estimate-' . bin2hex(random_bytes(8)),
+        'is_estimate'     => true,
         'source_currency' => BASE_CURRENCY,
         'source_amount'   => $amountAud,
         'target_currency' => strtoupper($targetCurrency),
         'target_amount'   => $conv['amount'],
-        'rate'            => $conv['rate'],        // 1 AUD = rate * target
-        'rate_source'     => $conv['source'],      // 'ecb' (live) | 'manual' (hand-set)
-        'rate_as_of'      => $conv['as_of'],       // ECB fix date, or crypto_rates.php as_of
-        'expires_at'      => date('c', time() + 300), // quotes are short-lived, 5 min
+        'rate'            => $conv['rate'],
+        'rate_source'     => $conv['source'],
+        'rate_as_of'      => $conv['as_of'],
+        'expires_at'      => date('c', time() + 300),
     ];
 }
 
 /**
- * Execute the payment against the quote. In the real integration this
- * triggers the outgoing payment grant + creation on the student's wallet.
+ * Execute the payment through Rafiki.
+ *
+ * The $estimate is passed in for logging and comparison only. Everything
+ * recorded downstream comes from the Rafiki response.
+ *
+ * @param array  $estimate       The display quote from getQuote().
+ * @param string $senderWallet   Wallet address to debit.
+ * @param string $description    Shown in the Rafiki/ILP metadata.
+ * @return array Normalised payment result.
+ * @throws RafikiException on any Interledger failure.
  */
-function createPayment(array $quote, string $studentWalletPointer): array
+function createPayment(array $estimate, string $senderWallet = '', string $description = 'UniPay student fee', ?string $externalRef = null): array
 {
-    // --- TODO: replace with real Open Payments /outgoing-payments call ---
+    // Escape hatch for demoing without a running playground. Nothing moves.
+    if (RAFIKI_MODE === 'stub') {
+        return [
+            'payment_id'     => 'stub-' . bin2hex(random_bytes(8)),
+            'status'         => 'completed',
+            'state'          => 'STUB',
+            'mode'           => 'stub',
+            'quote_id'       => $estimate['quote_id'] ?? null,
+            'wallet_pointer' => $senderWallet ?: RAFIKI_DEFAULT_SENDER_WALLET_ADDRESS,
+            'debit_amount'   => null,
+            'receive_amount' => null,
+            'completed_at'   => date('c'),
+        ];
+    }
+
+    $senderWallet = $senderWallet ?: RAFIKI_DEFAULT_SENDER_WALLET_ADDRESS;
+
+    // Resolve the sender's wallet URL to the internal id the Admin API needs.
+    $wallet = rafikiFindWalletByAddress(RAFIKI_SENDER_HOST, RAFIKI_SENDER_TENANT, $senderWallet);
+    if (!$wallet) {
+        throw new RafikiException("Sender wallet address not found on this Rafiki instance: $senderWallet");
+    }
+
+    // The fee is denominated in AUD, but the union's Rafiki wallet settles in
+    // RAFIKI_ASSET_CODE. On the Local Playground that asset is USD, so asking
+    // for "45.00" without converting would collect 45 USD for a 45 AUD fee.
+    //
+    // When the settlement asset already is the base currency (the correct
+    // production setup: an AUD asset on your Rafiki instance) this is a no-op.
+    // Otherwise we convert the fee into the settlement asset first, using the
+    // same ECB feed as the estimate, and record which rate was used.
+    $feeAud          = (float) $estimate['source_amount'];
+    $settlementRate  = 1.0;
+    $amountToReceive = $feeAud;
+
+    if (RAFIKI_ASSET_CODE !== BASE_CURRENCY) {
+        // Throws RatesUnavailableException rather than guessing, consistent
+        // with the no-fallback rule everywhere else.
+        $settle          = convertFromBase($feeAud, RAFIKI_ASSET_CODE);
+        $amountToReceive = $settle['amount'];
+        $settlementRate  = $settle['rate'];
+    }
+
+    $result = rafikiPay(
+        $wallet['id'],
+        RAFIKI_UNION_WALLET_ADDRESS,
+        $amountToReceive,
+        $description,
+        $externalRef
+    );
+
+    if (!$result['succeeded'] && ($result['state'] ?? '') === 'FAILED') {
+        $err = $result['payment']['error'] ?? 'unknown error';
+        throw new RafikiException("Interledger payment failed: $err");
+    }
+
+    $debit   = $result['debitAmount'];
+    $receive = $result['receiveAmount'];
+
     return [
-        'payment_id'    => 'demo-payment-' . bin2hex(random_bytes(8)),
-        'status'        => 'completed', // real integration: 'pending' until webhook/poll confirms
-        'quote_id'      => $quote['quote_id'],
-        'wallet_pointer'=> $studentWalletPointer,
-        'completed_at'  => date('c'),
+        'payment_id'     => $result['payment']['id'],
+        // UNKNOWN means still settling, not failed. The webhook resolves it.
+        'status'         => $result['succeeded'] ? 'completed' : 'pending',
+        'state'          => $result['state'],
+        'mode'           => 'live',
+        'quote_id'       => $result['quote']['id'],
+        'receiver_id'    => $result['receiver']['id'],
+        'wallet_pointer' => $senderWallet,
+
+        // Authoritative amounts, straight from Rafiki.
+        'debit_amount'   => $debit,
+        'receive_amount' => $receive,
+        'sent_amount'    => $result['sentAmount'],
+        'debit_value'    => $debit   ? fromMinorUnits($debit['value'],   (int) $debit['assetScale'])   : null,
+        'debit_currency' => $debit['assetCode']   ?? null,
+        'recv_value'     => $receive ? fromMinorUnits($receive['value'], (int) $receive['assetScale']) : null,
+        'recv_currency'  => $receive['assetCode'] ?? null,
+
+        // How the AUD fee was expressed in the settlement asset. 1.0 when the
+        // Rafiki asset is already AUD.
+        'fee_aud'          => $feeAud,
+        'settlement_rate'  => $settlementRate,
+        'settlement_asset' => RAFIKI_ASSET_CODE,
+
+        'completed_at'   => date('c'),
     ];
 }

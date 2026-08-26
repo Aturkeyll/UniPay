@@ -37,7 +37,7 @@ if ($link['status'] === 'paid') {
 
 $isOverdue = $link['due_date'] && strtotime($link['due_date']) < time();
 
-// Build the currency picker from the live rate feed. Reads cache only — this
+// Build the currency picker from the live rate feed. Reads cache only, this
 // never makes an outbound API call. If the cron has stalled, we show a notice
 // instead of a picker rather than offering currencies we can't price.
 $currencyGroups = null;
@@ -59,11 +59,12 @@ $groupLabels = ['fiat' => 'Currencies', 'crypto' => 'Cryptocurrencies', 'metal' 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Make a Payment — WSU Payments</title>
+    <title>Make a Payment | UniPay</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
-<h1>WSU Payments <span class="badge">x Interledger</span></h1>
+<?php require 'header.php'; ?>
 
 <h3>Review your payment</h3>
 
@@ -101,7 +102,7 @@ $groupLabels = ['fiat' => 'Currencies', 'crypto' => 'Cryptocurrencies', 'metal' 
                     <?php foreach ($list as $code => $name): ?>
                         <option value="<?= htmlspecialchars($code) ?>"
                             <?= $code === BASE_CURRENCY ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($code . ' — ' . $name) ?>
+                            <?= htmlspecialchars($code . ' - ' . $name) ?>
                         </option>
                     <?php endforeach; ?>
                 </optgroup>
@@ -111,9 +112,11 @@ $groupLabels = ['fiat' => 'Currencies', 'crypto' => 'Cryptocurrencies', 'metal' 
     </div>
 
     <div id="quoteBox" style="display:none;">
-        <p>You will pay: <strong id="convertedAmount"></strong></p>
+        <p>Estimated: <strong id="convertedAmount"></strong></p>
         <p class="small" id="rateLine"></p>
-        <p class="small">Quote expires in 5 minutes — click "Get quote" again if it lapses.</p>
+        <p class="small">Quote expires in 5 minutes; click "Get quote" again if it lapses.
+           The final amount is set by the Interledger network when you pay, and may
+           differ slightly from this estimate.</p>
         <button type="button" id="payBtn">PAY NOW</button>
     </div>
 
@@ -148,7 +151,7 @@ document.getElementById('convertBtn').addEventListener('click', async () => {
         ? `indicative rate, set manually on ${q.rate_as_of}`
         : `ECB reference rate, ${q.rate_as_of}`;
     document.getElementById('rateLine').textContent =
-        `Rate: 1 AUD = ${fmt(q.rate)} ${q.target_currency} — ${provenance}`;
+        `Rate: 1 AUD = ${fmt(q.rate)} ${q.target_currency} (${provenance})`;
     document.getElementById('rateLine').className =
         q.rate_source === 'manual' ? 'small indicative' : 'small';
     document.getElementById('quoteBox').style.display = 'block';
@@ -171,7 +174,14 @@ document.getElementById('payBtn').addEventListener('click', async () => {
     const data = await res.json();
     const box = document.getElementById('resultBox');
     if (data.success) {
-        box.innerHTML = '<p class="notice">Payment completed. Thank you!</p>';
+        // Report what actually moved on the network, not the estimate.
+        let msg = data.settled
+            ? 'Payment completed. Thank you!'
+            : 'Payment submitted and settling on the Interledger network.';
+        if (data.debit)    msg += `<br><span class="small">Debited: ${data.debit}</span>`;
+        if (data.received) msg += `<br><span class="small">Received by the union: ${data.received}</span>`;
+        if (data.ilp_state) msg += `<br><span class="small">Interledger state: ${data.ilp_state}</span>`;
+        box.innerHTML = `<p class="notice">${msg}</p>`;
         document.getElementById('payBtn').disabled = true;
     } else {
         box.innerHTML = '<p class="notice overdue">Payment failed: ' + data.error + '</p>';

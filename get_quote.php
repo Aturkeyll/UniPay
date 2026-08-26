@@ -4,6 +4,20 @@ require 'lib_openpayments.php';
 
 header('Content-Type: application/json');
 
+/**
+ * Show the real exception to localhost, a generic message to everyone else.
+ * Exception text leaks table names and file paths, so it must never reach a
+ * remote visitor, but hiding it during local development just means guessing.
+ */
+if (!function_exists('errorDetail')) {
+    function errorDetail(Throwable $e, string $publicMessage): string
+    {
+        $local = in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true);
+        return $local ? get_class($e) . ': ' . $e->getMessage() : $publicMessage;
+    }
+}
+
+
 $input    = json_decode(file_get_contents('php://input'), true);
 $token    = $input['token'] ?? '';
 $currency = strtoupper($input['currency'] ?? BASE_CURRENCY);
@@ -34,10 +48,14 @@ try {
     http_response_code(503);
     echo json_encode([
         'success' => false,
-        'error'   => 'Live exchange rates are temporarily unavailable. Please try again shortly.',
+        'error'   => errorDetail($e,
+            'Live exchange rates are temporarily unavailable. Please try again shortly.'),
     ]);
 
 } catch (Exception $e) {
     error_log('[unipay/quote] ' . $e->getMessage());
-    echo json_encode(['success' => false, 'error' => 'Could not produce a quote for that currency.']);
+    echo json_encode([
+        'success' => false,
+        'error'   => errorDetail($e, 'Could not produce a quote for that currency.'),
+    ]);
 }

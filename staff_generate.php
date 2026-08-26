@@ -83,11 +83,12 @@ $items = $pdo->query("SELECT id, name, default_amount FROM items WHERE active = 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generate Payment Link — WSU Payments</title>
+    <title>Generate Payment Link | UniPay</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
-    <h1>WSU Payments <span class="badge">x Interledger</span></h1>
+<?php require 'header.php'; ?>
     <h3>Generate a payment request link</h3>
 
     <?php if ($message): ?>

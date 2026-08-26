@@ -1,5 +1,6 @@
 <?php
 require 'db.php';
+require 'lib_student_auth.php';
 header('Content-Type: application/json');
 
 /**
@@ -10,27 +11,41 @@ header('Content-Type: application/json');
  * question to Claude to produce a friendly, accurate natural-language answer.
  *
  * Important: the model is only ever given the student's OWN data, already
- * filtered server-side by student_number — it never has free rein over the DB,
+ * filtered server-side by student_number; it never has free rein over the DB,
  * so it can't leak another student's payment info even if asked to.
+ *
+ * That scoping is only as good as the identity check in front of it. This
+ * endpoint returns pay_link URLs containing payment tokens, so accepting a bare
+ * 7-digit number meant the ID space could be walked for working payment links.
+ * A matching surname is now required, rate-limited per IP.
  */
 
 $input = json_decode(file_get_contents('php://input'), true);
 $studentNumber = trim($input['student_number'] ?? '');
-$question = trim($input['question'] ?? '');
+$surname       = trim($input['surname'] ?? '');
+$question      = trim($input['question'] ?? '');
 
-if (!preg_match('/^\d{7}$/', $studentNumber)) {
-    echo json_encode(['success' => false, 'error' => 'Enter a valid 7-digit student number.']);
+$pdo = getDb();
+
+try {
+    $student = verifyStudent($studentNumber, $surname);
+} catch (StudentAuthRateLimited $e) {
+    http_response_code(429);
+    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     exit;
 }
 
-$pdo = getDb();
-$stmt = $pdo->prepare("SELECT * FROM students WHERE student_number = ?");
-$stmt->execute([$studentNumber]);
-$student = $stmt->fetch();
-
 if (!$student) {
-    echo json_encode(['success' => false, 'error' => 'Student number not recognized.']);
+    // Deliberately the same message whether the number is unknown or the
+    // surname is wrong, distinguishing them confirms valid student numbers.
+    echo json_encode(['success' => false, 'error' => STUDENT_AUTH_GENERIC_ERROR]);
     exit;
+}
+
+// Cap question length: this string reaches a paid API, so an unbounded field
+// is both a cost and an abuse vector.
+if (mb_strlen($question) > 500) {
+    $question = mb_substr($question, 0, 500);
 }
 
 // Pull only this student's outstanding items
@@ -56,7 +71,7 @@ $contextData = array_map(function ($o) {
 
 $systemPrompt = "You are a helpful payments assistant for {$student['first_name']}'s university student union. "
     . "You are given ONLY this student's own outstanding payment data as JSON. "
-    . "Answer their question using only this data — never invent amounts or items. "
+    . "Answer their question using only this data. Never invent amounts or items. "
     . "If they owe nothing, say so cheerfully. Keep answers short (2-4 sentences). "
     . "Include specific dollar amounts and due dates when relevant, and mention "
     . "the payment link when suggesting they pay something.\n\n"

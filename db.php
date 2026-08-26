@@ -1,5 +1,5 @@
 <?php
-// Database connection — XAMPP defaults (root, no password).
+// Database connection: XAMPP defaults (root, no password).
 // If you've set a root password via phpMyAdmin, put it in the empty string below.
 function getDb() {
     static $pdo;

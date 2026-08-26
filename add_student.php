@@ -40,11 +40,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Add Student/Payee — WSU Payments</title>
+    <title>Add Student/Payee | UniPay</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
-    <h1>WSU Payments <span class="badge">x Interledger</span></h1>
+<?php require 'header.php'; ?>
     <h3>Add a student or external payee manually</h3>
 
     <?php if ($message): ?><div class="notice"><?= htmlspecialchars($message) ?></div><?php endif; ?>
