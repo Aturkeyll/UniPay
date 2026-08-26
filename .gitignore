@@ -1,0 +1,16 @@
+# Generated at runtime. Never commit these.
+.db_password
+logs/
+db.php.bak.*
+cache/*.json
+cache/*.tmp
+cache/*.log
+
+# Local env overrides
+.env
+*.local.php
+
+# Editor noise
+.vscode/
+.idea/
+*.swp

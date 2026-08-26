@@ -1,0 +1,3 @@
+# Apache: never serve the rate cache directly.
+# (Better still, move this directory outside your document root.)
+Require all denied
