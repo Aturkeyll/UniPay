@@ -121,7 +121,6 @@ $groupLabels = ['fiat' => 'Currencies', 'crypto' => 'Cryptocurrencies', 'metal' 
 
 <script>
 const token = <?= json_encode($token) ?>;
-const amountAud = <?= json_encode((float)$link['amount']) ?>;
 let currentQuote = null;
 
 // Trim trailing zeros so 0.000470000000 renders as 0.00047.
@@ -144,9 +143,14 @@ document.getElementById('convertBtn').addEventListener('click', async () => {
     currentQuote = data.quote;
     document.getElementById('convertedAmount').textContent =
         `${fmt(data.quote.target_amount)} ${data.quote.target_currency}`;
+    const q = data.quote;
+    const provenance = q.rate_source === 'manual'
+        ? `indicative rate, set manually on ${q.rate_as_of}`
+        : `ECB reference rate, ${q.rate_as_of}`;
     document.getElementById('rateLine').textContent =
-        `Rate: 1 AUD = ${fmt(data.quote.rate)} ${data.quote.target_currency}`
-        + (data.quote.rate_as_of ? ` (as of ${data.quote.rate_as_of})` : '');
+        `Rate: 1 AUD = ${fmt(q.rate)} ${q.target_currency} — ${provenance}`;
+    document.getElementById('rateLine').className =
+        q.rate_source === 'manual' ? 'small indicative' : 'small';
     document.getElementById('quoteBox').style.display = 'block';
 });
 

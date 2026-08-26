@@ -87,7 +87,8 @@ CREATE TABLE transactions (
     -- The rate this payment was struck at. Required to reconcile a crypto
     -- amount back to the AUD fee it settled.
     fx_rate DECIMAL(30,12) NULL,                 -- 1 AUD = fx_rate * currency_source
-    rate_as_of VARCHAR(40) NULL,                 -- CurrencyFreaks rate timestamp
+    rate_source VARCHAR(16) NULL,                -- 'ecb' (live) | 'manual' (crypto_rates.php)
+    rate_as_of VARCHAR(40) NULL,                 -- ECB fix date, or crypto_rates.php as_of
 
     ilp_payment_pointer VARCHAR(255) NULL,
     ilp_quote_id VARCHAR(255) NULL,

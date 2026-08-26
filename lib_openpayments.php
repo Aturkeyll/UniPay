@@ -4,8 +4,9 @@
  *
  * This wraps the Open Payments flow: get a quote (currency/asset conversion),
  * then create the incoming/outgoing payment. The network calls to Interledger
- * are still stubbed so the rest of the app can be demoed; the FX rates behind
- * getQuote() are now LIVE (see lib_rates.php).
+ * are still stubbed so the rest of the app can be demoed. The FX rates behind
+ * getQuote() come from lib_rates.php: ECB fiat is live, crypto is hand-set in
+ * crypto_rates.php and every quote records which of the two it used.
  *
  * Real flow (for reference, when you wire it up):
  *   1. GET the receiving wallet address -> resource server + auth server URLs
@@ -18,6 +19,8 @@
  * authoritative for the conversion. At that point the rate from lib_rates.php
  * becomes a pre-authorization *estimate* shown to the student, and must NOT be
  * applied on top of the ILP rate. Converting twice is a nasty bug to find.
+ * This matters most for the hand-set crypto rates, which will drift furthest
+ * from whatever the ILP network actually quotes.
  */
 
 require_once __DIR__ . '/lib_rates.php';
@@ -41,7 +44,8 @@ function getQuote(float $amountAud, string $targetCurrency): array
         'target_currency' => strtoupper($targetCurrency),
         'target_amount'   => $conv['amount'],
         'rate'            => $conv['rate'],        // 1 AUD = rate * target
-        'rate_as_of'      => $conv['as_of'],       // CurrencyFreaks' own timestamp
+        'rate_source'     => $conv['source'],      // 'ecb' (live) | 'manual' (hand-set)
+        'rate_as_of'      => $conv['as_of'],       // ECB fix date, or crypto_rates.php as_of
         'expires_at'      => date('c', time() + 300), // quotes are short-lived, 5 min
     ];
 }

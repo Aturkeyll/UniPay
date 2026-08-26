@@ -38,8 +38,9 @@ try {
 
     // Rates refresh hourly and the displayed quote lives 5 minutes, so the
     // recomputed figure should match what the student saw. If a refresh landed
-    // in between, make them re-quote rather than silently charging a different
-    // amount. 1% tolerance absorbs float/rounding noise only.
+    // in between — or someone edited crypto_rates.php mid-checkout — make them
+    // re-quote rather than silently charging a different amount. The 1%
+    // tolerance absorbs float/rounding noise only.
     if ($displayedAmount !== null && $displayedAmount > 0) {
         $drift = abs($quote['target_amount'] - $displayedAmount) / $displayedAmount;
         if ($drift > 0.01) {
@@ -62,14 +63,15 @@ try {
     $stmt = $pdo->prepare(
         "INSERT INTO transactions
          (payment_link_id, student_id, payee_id, item_id, amount_source, currency_source,
-          amount_dest, currency_dest, fx_rate, rate_as_of, ilp_payment_pointer, ilp_quote_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')"
+          amount_dest, currency_dest, fx_rate, rate_source, rate_as_of,
+          ilp_payment_pointer, ilp_quote_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')"
     );
     $stmt->execute([
         $link['id'], $link['student_id'], $link['payee_id'], $link['item_id'],
         $quote['target_amount'], $quote['target_currency'],   // what the payer sent
         $quote['source_amount'], $quote['source_currency'],   // what the union receives (AUD)
-        $quote['rate'], $quote['rate_as_of'],
+        $quote['rate'], $quote['rate_source'], $quote['rate_as_of'],
         $studentWalletPointer, $quote['quote_id'],
     ]);
     $transactionId = $pdo->lastInsertId();
@@ -82,7 +84,8 @@ try {
     $actorType = $link['student_id'] ? 'student' : 'payee';
     $actorId   = $link['student_id'] ?: $link['payee_id'];
     logAction($actorType, $actorId, 'payment_completed', 'transaction', $transactionId,
-        "via {$quote['target_currency']}, amount {$quote['target_amount']}, rate {$quote['rate']}");
+        "via {$quote['target_currency']}, amount {$quote['target_amount']}, "
+        . "rate {$quote['rate']} ({$quote['rate_source']}, as of {$quote['rate_as_of']})");
 
     echo json_encode(['success' => true, 'transaction_id' => $transactionId]);
 
